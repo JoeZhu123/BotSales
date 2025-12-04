@@ -56,6 +56,12 @@ async def main():
     print(f"1688平均进货价 (CNY): ¥{analysis['avg_sourcing_price_cny']}")
     print(f"预估毛利率: {analysis['estimated_margin']}")
     print(f"系统建议: {analysis['recommendation']}")
+    
+    if 'ai_analysis' in analysis:
+        print("-" * 30)
+        print("🤖 AI 智能点评:")
+        print(analysis['ai_analysis'])
+        
     print("-" * 50)
 
     # === 数据保存与清理逻辑 ===

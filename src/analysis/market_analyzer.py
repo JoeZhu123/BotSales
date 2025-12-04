@@ -1,18 +1,23 @@
 import pandas as pd
 from typing import List, Dict
 import re
+from src.utils.llm_client import LLMClient
+import logging
+
+logger = logging.getLogger(__name__)
 
 class MarketAnalyzer:
     """
-    市场分析器：计算利润空间和推荐指数
+    市场分析器：计算利润空间 + AI 智能点评
     """
+    def __init__(self):
+        self.llm = LLMClient()
     
     @staticmethod
     def clean_price(price_str: str) -> float:
         """清理价格字符串，转换为浮点数"""
         if not price_str or price_str == "N/A":
             return 0.0
-        # 移除非数字字符（保留小数点）
         clean = re.sub(r'[^\d\.]', '', price_str)
         try:
             return float(clean)
@@ -23,29 +28,56 @@ class MarketAnalyzer:
         """
         分析选品潜力
         """
-        # 1. 计算亚马逊平均售价
+        # 1. 基础数据计算
         amz_prices = [self.clean_price(p['price']) for p in amazon_data if p['price'] != "N/A"]
         avg_amz_price = sum(amz_prices) / len(amz_prices) if amz_prices else 0
         
-        # 2. 计算1688平均进货价
         src_prices = [self.clean_price(p['price']) for p in source_data if p['price'] != "N/A"]
         avg_src_price = sum(src_prices) / len(src_prices) if src_prices else 0
         
-        # 3. 汇率估算 (假设 1 USD = 7.2 CNY)
-        # 注意：亚马逊抓取到的价格通常是美元符号$，1688是人民币￥
-        # 这里简化处理，假设amz_prices是美元，src_prices是人民币
         exchange_rate = 7.2
         avg_amz_price_cny = avg_amz_price * exchange_rate
         
-        # 4. 粗略毛利计算
         gross_margin = 0
         if avg_amz_price_cny > 0:
             gross_margin = (avg_amz_price_cny - avg_src_price) / avg_amz_price_cny
             
+        # 2. AI 智能点评
+        ai_comment = "AI 分析未启用或配置错误。"
+        if self.llm.client:
+            try:
+                # 构建 Prompt
+                prompt = f"""
+                Please act as a professional e-commerce data analyst. I have collected some product data from Amazon and 1688.
+                
+                Product Keyword: {amazon_data[0]['keyword'] if amazon_data else 'Unknown'}
+                
+                Amazon Market Data (Competitors):
+                - Average Price: ${avg_amz_price:.2f}
+                - Top Listings: {[p['title'][:30] + '... ($' + str(p['price']) + ')' for p in amazon_data[:3]]}
+                
+                1688 Sourcing Data (Cost):
+                - Average Cost: ¥{avg_src_price:.2f}
+                - Top Suppliers: {[s['title'][:20] + '... (¥' + str(s['price']) + ')' for s in source_data[:3]]}
+                
+                Estimated Gross Margin: {gross_margin*100:.1f}%
+                
+                Please provide a short, strategic analysis (in Chinese) covering:
+                1. Profitability analysis.
+                2. Market competitiveness.
+                3. Suggestion: "Highly Recommended", "Cautious", or "Avoid".
+                """
+                
+                logger.info("正在调用 LLM 生成分析报告...")
+                ai_comment = self.llm.get_completion(prompt)
+            except Exception as e:
+                logger.error(f"AI 分析生成失败: {e}")
+                ai_comment = "AI 分析生成过程中发生错误。"
+
         return {
             "avg_amazon_price_usd": round(avg_amz_price, 2),
             "avg_sourcing_price_cny": round(avg_src_price, 2),
             "estimated_margin": f"{gross_margin*100:.1f}%",
-            "recommendation": "High Potential" if gross_margin > 0.4 else "Medium/Low Potential"
+            "recommendation": "High Potential" if gross_margin > 0.4 else "Medium/Low Potential",
+            "ai_analysis": ai_comment # 新增字段
         }
-
