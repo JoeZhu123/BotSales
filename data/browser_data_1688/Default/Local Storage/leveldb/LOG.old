@@ -1,6 +1,0 @@
-2025/12/03-01:15:13.631 6458 Reusing MANIFEST C:\Users\xzhu\BotSales\data\browser_data_1688\Default\Local Storage\leveldb/MANIFEST-000001
-2025/12/03-01:15:13.640 6458 Recovering log #4
-2025/12/03-01:15:13.644 6458 Reusing old log C:\Users\xzhu\BotSales\data\browser_data_1688\Default\Local Storage\leveldb/000004.log 
-2025/12/03-01:15:32.063 16c8 Level-0 table #7: started
-2025/12/03-01:15:32.082 16c8 Level-0 table #7: 205297 bytes OK
-2025/12/03-01:15:32.085 16c8 Delete type=0 #4

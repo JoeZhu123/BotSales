@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 import sys
 import io
+import shutil
 
 # 强制设置标准输出为 utf-8，解决 Windows 控制台中文乱码问题
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -42,12 +43,12 @@ async def main():
     sourcer = Sourcer1688()
     sources = await sourcer.search_source(cn_keyword, limit=5)
     
-    # 5. 深度分析
+    # 5. 深度分析 & 报告生成
     print(f"\n[4/4] 生成市场分析报告...")
     analyzer = MarketAnalyzer()
     analysis = analyzer.analyze_potential(products, sources)
     
-    # 打印分析结果
+    # 打印控制台摘要
     print("\n" + "="*50)
     print(f" 选品分析报告: {keyword}")
     print("="*50)
@@ -56,25 +57,42 @@ async def main():
     print(f"预估毛利率: {analysis['estimated_margin']}")
     print(f"系统建议: {analysis['recommendation']}")
     print("-" * 50)
-    
-    print("\n--- 亚马逊市场 (Top Items) ---")
-    for p in products:
-        print(f"- [{p['price']}] {p['title'][:50]}...")
-        
-    print("\n--- 1688 供应链 (Top Suppliers) ---")
-    if sources:
-        for s in sources:
-            print(f"- [{s['price']}] {s['supplier']} | {s['title'][:30]}...")
-    else:
-        print("未找到相关供应商（建议：首次使用请开启 HEADLESS_MODE=False 手动登录一次 1688）。")
 
-    # 保存数据
+    # === 数据保存与清理逻辑 ===
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_dir = os.path.join("data", "reports")
+    if not os.path.exists(report_dir):
+        os.makedirs(report_dir)
+        
+    # 1. 生成综合报告 (Excel)
+    report_file = os.path.join(report_dir, f"Analysis_{keyword}_{timestamp}.xlsx")
     
-    if products:
-        pd.DataFrame(products).to_csv(f"data/amazon_{keyword}_{timestamp}.csv", index=False)
-    if sources:
-        pd.DataFrame(sources).to_csv(f"data/1688_{cn_keyword}_{timestamp}.csv", index=False, encoding='utf_8_sig')
+    with pd.ExcelWriter(report_file, engine='openpyxl') as writer:
+        # 概览页
+        summary_df = pd.DataFrame([analysis])
+        summary_df.to_excel(writer, sheet_name='Summary', index=False)
+        
+        # 亚马逊详情页
+        if products:
+            pd.DataFrame(products).to_excel(writer, sheet_name='Amazon_Data', index=False)
+            
+        # 1688详情页
+        if sources:
+            pd.DataFrame(sources).to_excel(writer, sheet_name='1688_Data', index=False)
+            
+    print(f"\n✅ 最终报告已生成: {report_file}")
+    
+    # 2. 清理临时的 raw csv 文件 (如果有的话，之前版本会生成)
+    # 检查 data 目录下所有以 .csv 结尾的非报告文件
+    for filename in os.listdir("data"):
+        if filename.endswith(".csv"):
+            try:
+                os.remove(os.path.join("data", filename))
+                print(f"已清理临时文件: {filename}")
+            except Exception as e:
+                print(f"清理失败 {filename}: {e}")
 
 if __name__ == "__main__":
+    # 需要安装 openpyxl 库来支持 Excel 写入
+    # pip install openpyxl
     asyncio.run(main())
