@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.toast
+.cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment Variables
+.env
+
+# Data and Reports
+data/browser_data_1688/
+data/reports/
+*.xlsx
+*.csv
+
+# Debug and Visualization
+*.png
+debug_*.py
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+

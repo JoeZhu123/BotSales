@@ -1,104 +1,141 @@
 import asyncio
 from src.crawlers.amazon_crawler import AmazonCrawler
+from src.crawlers.aliexpress_crawler import AliExpressCrawler
+from src.crawlers.kickstarter_crawler import KickstarterCrawler
 from src.sourcing.sourcer_1688 import Sourcer1688
+from src.sourcing.sourcer_yiwugo import SourcerYiwuGo
 from src.utils.translator import Translator
 from src.analysis.market_analyzer import MarketAnalyzer
+from src.utils.visualizer import DataVisualizer
 import pandas as pd
 import os
 from datetime import datetime
 import sys
 import io
-import shutil
 
-# 强制设置标准输出为 utf-8，解决 Windows 控制台中文乱码问题
+# 强制设置标准输出为 utf-8
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 async def main():
-    print("=== AI Sales Bot Started ===")
+    print("=== AI 全球电商选品系统 v3.0 (含众筹趋势) ===")
     
-    # 1. 获取用户输入 (演示模式下固定为 yoga mat)
-    keyword = "yoga mat"
+    keyword = "yoga mat" # 默认演示关键词
+    safe_keyword = keyword.replace(" ", "_")
     print(f"Target Keyword: {keyword}")
 
-    # 2. Amazon 数据采集
-    print(f"\n[1/4] 正在从 Amazon 采集 '{keyword}' 的销售数据...")
-    crawler = AmazonCrawler()
-    products = await crawler.search_products(keyword, limit=5)
-    await crawler.close()
+    # === 1. 销售端数据 (Sales) ===
+    sales_data = []
     
-    if not products:
-        print("未能抓取到亚马逊数据，程序终止。")
+    # Task 1: Amazon
+    print(f"\n[1/6] 正在采集 Amazon 数据...")
+    amz = AmazonCrawler()
+    res = await amz.search_products(keyword, limit=5)
+    await amz.close()
+    if res:
+        print(f"✅ Amazon: {len(res)} items")
+        sales_data.extend(res)
+    
+    # Task 2: AliExpress
+    print(f"\n[2/6] 正在采集 AliExpress 数据...")
+    ali = AliExpressCrawler()
+    res = await ali.search_products(keyword, limit=5)
+    await ali.close()
+    if res:
+        print(f"✅ AliExpress: {len(res)} items")
+        sales_data.extend(res)
+
+    if not sales_data:
+        print("❌ 未能采集到销售数据，程序终止。")
         return
-    
-    print(f"成功抓取 {len(products)} 个商品。")
-    
-    # 3. 分析与翻译
-    print(f"\n[2/4] 分析热门商品并翻译关键词...")
+
+    # === 2. 趋势端数据 (Trends) ===
+    trend_data = []
+    print(f"\n[3/6] 正在采集 Kickstarter 创新趋势...")
+    ks = KickstarterCrawler()
+    res = await ks.search_products(keyword, limit=5)
+    await ks.close()
+    if res:
+        print(f"✅ Kickstarter: {len(res)} projects")
+        trend_data.extend(res)
+    else:
+        print("⚠️ 未找到相关 Kickstarter 项目 (可能该品类较传统)")
+
+    # === 3. 翻译关键词 ===
+    print(f"\n[4/6] 智能翻译关键词...")
     translator = Translator()
     cn_keyword = translator.translate_to_chinese(keyword)
     print(f"目标中文关键词: {cn_keyword}")
     
-    # 4. 1688 找货
-    print(f"\n[3/4] 正在 1688 寻找 '{cn_keyword}' 的供应商...")
-    sourcer = Sourcer1688()
-    sources = await sourcer.search_source(cn_keyword, limit=5)
+    # === 4. 供应链端数据 (Sourcing) ===
+    sourcing_data = []
     
-    # 5. 深度分析 & 报告生成
-    print(f"\n[4/4] 生成市场分析报告...")
+    # Task 3: 1688
+    print(f"\n[5/6] 正在采集 1688 货源...")
+    s1688 = Sourcer1688()
+    res = await s1688.search_source(cn_keyword, limit=5)
+    if res:
+        print(f"✅ 1688: {len(res)} suppliers")
+        sourcing_data.extend(res)
+        
+    # Task 4: YiwuGo
+    print(f"      正在采集 义乌购 货源...")
+    sy = SourcerYiwuGo()
+    res = await sy.search_source(cn_keyword, limit=5)
+    if res:
+        print(f"✅ YiwuGo: {len(res)} suppliers")
+        sourcing_data.extend(res)
+    
+    # === 5. 深度分析 & 报告生成 ===
+    print(f"\n[6/6] 生成全网趋势分析报告...")
     analyzer = MarketAnalyzer()
-    analysis = analyzer.analyze_potential(products, sources)
     
-    # 打印控制台摘要
+    analysis = analyzer.analyze_potential(sales_data, sourcing_data, trend_data)
+    
+    # 打印简报
     print("\n" + "="*50)
-    print(f" 选品分析报告: {keyword}")
+    print(f" 选品分析简报: {keyword}")
     print("="*50)
-    print(f"亚马逊平均售价 (USD): ${analysis['avg_amazon_price_usd']}")
-    print(f"1688平均进货价 (CNY): ¥{analysis['avg_sourcing_price_cny']}")
-    print(f"预估毛利率: {analysis['estimated_margin']}")
-    print(f"系统建议: {analysis['recommendation']}")
+    print(f"Amazon 均价: ${analysis.get('avg_amazon_price_usd', 0)}")
+    print(f"供应链均价: ¥{analysis.get('avg_sourcing_price_cny', 0)}")
     
     if 'ai_analysis' in analysis:
         print("-" * 30)
-        print("🤖 AI 智能点评:")
+        print("🤖 AI 创新洞察:")
         print(analysis['ai_analysis'])
-        
     print("-" * 50)
 
-    # === 数据保存与清理逻辑 ===
+    # === 6. 生成可视化图表 ===
+    print(f"\n正在绘制数据仪表盘图表...")
+    visualizer = DataVisualizer()
+    viz_path = visualizer.generate_dashboard(safe_keyword, analysis, sales_data, sourcing_data, trend_data)
+    print(f"✅ 可视化仪表盘已生成: {viz_path}")
+
+    # === 数据保存 ===
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     report_dir = os.path.join("data", "reports")
     if not os.path.exists(report_dir):
         os.makedirs(report_dir)
         
-    # 1. 生成综合报告 (Excel)
-    report_file = os.path.join(report_dir, f"Analysis_{keyword}_{timestamp}.xlsx")
+    report_file = os.path.join(report_dir, f"TrendAnalysis_{safe_keyword}_{timestamp}.xlsx")
     
     with pd.ExcelWriter(report_file, engine='openpyxl') as writer:
-        # 概览页
-        summary_df = pd.DataFrame([analysis])
-        summary_df.to_excel(writer, sheet_name='Summary', index=False)
-        
-        # 亚马逊详情页
-        if products:
-            pd.DataFrame(products).to_excel(writer, sheet_name='Amazon_Data', index=False)
+        pd.DataFrame([analysis]).to_excel(writer, sheet_name='Summary', index=False)
+        if sales_data:
+            pd.DataFrame(sales_data).to_excel(writer, sheet_name='Sales', index=False)
+        if sourcing_data:
+            pd.DataFrame(sourcing_data).to_excel(writer, sheet_name='Sourcing', index=False)
+        if trend_data:
+            pd.DataFrame(trend_data).to_excel(writer, sheet_name='Trends_Kickstarter', index=False)
             
-        # 1688详情页
-        if sources:
-            pd.DataFrame(sources).to_excel(writer, sheet_name='1688_Data', index=False)
-            
-    print(f"\n✅ 最终报告已生成: {report_file}")
+    print(f"\n✅ 趋势报告已生成: {report_file}")
     
-    # 2. 清理临时的 raw csv 文件 (如果有的话，之前版本会生成)
-    # 检查 data 目录下所有以 .csv 结尾的非报告文件
+    # 清理临时文件
     for filename in os.listdir("data"):
         if filename.endswith(".csv"):
             try:
                 os.remove(os.path.join("data", filename))
-                print(f"已清理临时文件: {filename}")
-            except Exception as e:
-                print(f"清理失败 {filename}: {e}")
+            except:
+                pass
 
 if __name__ == "__main__":
-    # 需要安装 openpyxl 库来支持 Excel 写入
-    # pip install openpyxl
     asyncio.run(main())
