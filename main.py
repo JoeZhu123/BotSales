@@ -3,6 +3,7 @@ from src.crawlers.amazon_crawler import AmazonCrawler
 from src.crawlers.aliexpress_crawler import AliExpressCrawler
 from src.crawlers.temu_crawler import TemuCrawler
 from src.crawlers.shopee_crawler import ShopeeCrawler
+from src.crawlers.tiktok_crawler import TikTokCrawler
 from src.crawlers.kickstarter_crawler import KickstarterCrawler
 from src.sourcing.sourcer_1688 import Sourcer1688
 from src.sourcing.sourcer_yiwugo import SourcerYiwuGo
@@ -65,12 +66,26 @@ async def main():
         print(f"✅ Shopee: {len(res)} items")
         sales_data.extend(res)
 
+    print(f"\n[新增] 正在通过 TikTok 接口采集实时爆品...")
+    tiktok = TikTokCrawler()
+    # 1. 搜索特定关键词商品
+    res_search = await tiktok.search_products(keyword, limit=5)
+    sales_data.extend(res_search)
+    # 2. 获取全网实时爆品榜单作为参考
+    res_trending = await tiktok.get_trending_products(limit=5)
+    # 趋势榜单数据存入 trend_data 供 AI 分析
+    await tiktok.close()
+    if res_search: print(f"✅ TikTok Shop: {len(res_search)} items")
+    if res_trending: print(f"✅ TikTok Trending: {len(res_trending)} hot items")
+
     if not sales_data:
-        print("❌ 未能采集到销售数据，程序终止。")
+        print("❌ 未能采集到任何平台的销售数据，程序终止。")
         return
 
     # === 2. 趋势端数据 (Trends) ===
     trend_data = []
+    if res_trending:
+        trend_data.extend(res_trending)
     print(f"\n[3/6] 正在采集 Kickstarter 创新趋势...")
     ks = KickstarterCrawler()
     res = await ks.search_products(keyword, limit=5)

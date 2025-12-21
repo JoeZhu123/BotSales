@@ -29,7 +29,7 @@ class MarketAnalyzer:
         分析选品潜力 (Sales + Sourcing + Trends)
         """
         # 1. 基础数据计算
-        platforms = ["Amazon", "AliExpress", "Temu", "Shopee"]
+        platforms = ["Amazon", "AliExpress", "Temu", "Shopee", "TikTok Shop"]
         platform_stats = {}
         
         all_sales_prices_cny = []
@@ -42,7 +42,6 @@ class MarketAnalyzer:
             platform_stats[p_name] = avg
             
             # 统一换算为 CNY 用于计算毛利
-            # 假设 Shopee/Temu 也是以 USD 采集或类似汇率，这里简化处理
             for pr in prices:
                 all_sales_prices_cny.append(pr * exchange_rate)
 
@@ -60,15 +59,23 @@ class MarketAnalyzer:
         if self.llm.client:
             try:
                 # 提取各平台摘要
-                sales_summary = "\n".join([f"- [{item['platform']}] {item['title'][:30]}... ({item['price']})" for item in sales_data[:10]])
-                sourcing_summary = "\n".join([f"- [{item['platform']}] {item['title'][:20]}... (¥{item['price']})" for item in sourcing_data[:6]])
+                sales_summary = "\n".join([f"- [{item['platform']}] {item['title'][:30]}... ({item.get('price', 'N/A')})" for item in sales_data[:12]])
+                sourcing_summary = "\n".join([f"- [{item['platform']}] {item['title'][:20]}... (¥{item.get('price', 'N/A')})" for item in sourcing_data[:6]])
+                
+                # 趋势数据 (包括 Kickstarter 和 TikTok Trending)
                 trend_summary = "No Trend Data"
                 if trend_data:
-                    trend_summary = "\n".join([f"- [Kickstarter] {item['title'][:40]}... (Raised: {item['pledged']})" for item in trend_data[:3]])
+                    trend_items = []
+                    for item in trend_data:
+                        if 'pledged' in item: # Kickstarter
+                            trend_items.append(f"- [Kickstarter] {item['title'][:40]}... (Raised: {item['pledged']})")
+                        elif 'hot_index' in item: # TikTok Trending
+                            trend_items.append(f"- [TikTok Hot] {item['title'][:40]}... (Hot Index: {item['hot_index']})")
+                    trend_summary = "\n".join(trend_items[:6])
                 
                 # 构建 Prompt
                 prompt = f"""
-                You are a Global E-commerce Strategy Expert. Analyze data from Amazon, AliExpress, Temu, Shopee, and 1688.
+                You are a Global E-commerce Strategy Expert. Analyze data from Amazon, AliExpress, Temu, Shopee, TikTok Shop, and 1688.
                 
                 Product Keyword: {sales_data[0]['keyword'] if sales_data else 'Unknown'}
                 
@@ -77,20 +84,21 @@ class MarketAnalyzer:
                 - Amazon Avg: ${platform_stats.get('Amazon', 0):.2f}
                 - Temu Avg: ${platform_stats.get('Temu', 0):.2f}
                 - Shopee Avg: ${platform_stats.get('Shopee', 0):.2f}
+                - TikTok Shop Avg: ${platform_stats.get('TikTok Shop', 0):.2f}
                 
                 2. SUPPLY CHAIN (1688/YiwuGo):
                 {sourcing_summary}
                 Average Cost: ¥{avg_src_price:.2f}
                 Estimated Global Margin: {gross_margin*100:.1f}%
                 
-                3. FUTURE TRENDS (Innovation):
+                3. REAL-TIME TRENDS (TikTok Hot & Kickstarter Innovation):
                 {trend_summary}
                 
                 Please provide a strategic report (in Chinese):
-                1. **Global Pricing Strategy**: Compare pricing across Amazon (premium), Temu (ultra-low), and Shopee (regional). Where is the best profit?
-                2. **Profitability**: Is the sourcing cost low enough to compete on Temu while maintaining Amazon-level quality?
-                3. **Innovation & Differentiation**: What features from Kickstarter can be used to avoid a price war on Temu/Shopee?
-                4. **Actionable Advice**: Recommend which platform to focus on first.
+                1. **Global Pricing Strategy**: Compare pricing across platforms. Is TikTok Shop's viral nature leading to higher or lower prices?
+                2. **TikTok Shop Viral Potential**: Based on "TikTok Hot" data, does this product have short-video viral potential?
+                3. **Innovation & Differentiation**: What features from Kickstarter or TikTok trends can be used to avoid a price war?
+                4. **Actionable Advice**: Recommend which platform to focus on first and the content strategy (e.g., video-first for TikTok).
                 """
                 
                 logger.info("正在调用 LLM 生成全网深度分析报告...")
