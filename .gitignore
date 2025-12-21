@@ -20,12 +20,10 @@ htmlcov/
 
 # Data and Reports
 data/browser_data_1688/
-data/reports/
-*.xlsx
-*.csv
-
-# Debug and Visualization
-*.png
+# data/reports/  <-- 允许上传报告
+# *.xlsx
+# *.csv
+# *.png
 debug_*.py
 
 # Editors

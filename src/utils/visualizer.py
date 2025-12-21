@@ -95,7 +95,8 @@ class DataVisualizer:
 
         if plot_data:
             df = pd.DataFrame(plot_data)
-            sns.barplot(data=df, x="平台", y="价格(RMB)", ax=ax, palette="viridis")
+            # 修复警告：显式指定 hue
+            sns.barplot(data=df, x="平台", y="价格(RMB)", ax=ax, hue="平台", palette="viridis", legend=False)
             ax.set_title("各平台价格对比 (换算为RMB)", fontsize=14)
         else:
             ax.text(0.5, 0.5, "价格数据不足", ha='center')
@@ -129,7 +130,8 @@ class DataVisualizer:
         
         if plot_data:
             df = pd.DataFrame(plot_data).sort_values("已筹金额($)", ascending=False)
-            sns.barplot(data=df, x="已筹金额($)", y="项目", ax=ax, palette="rocket")
+            # 修复警告：显式指定 hue
+            sns.barplot(data=df, x="已筹金额($)", y="项目", ax=ax, hue="项目", palette="rocket", legend=False)
             ax.set_title("Kickstarter 相关项目热度", fontsize=14)
         else:
             ax.text(0.5, 0.5, "众筹金额数据解析失败", ha='center')

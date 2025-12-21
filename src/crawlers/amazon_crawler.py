@@ -5,6 +5,7 @@ from src.crawlers.base_crawler import BaseCrawler
 from src.config import Config
 import random
 from fake_useragent import UserAgent
+from playwright_stealth import Stealth
 
 class AmazonCrawler(BaseCrawler):
     def __init__(self):
@@ -36,22 +37,51 @@ class AmazonCrawler(BaseCrawler):
         await self._init_browser()
         page = await self.context.new_page()
         
+        # 应用 Stealth 插件，隐藏自动化特征
+        stealth = Stealth()
+        await stealth.apply_stealth_async(page)
+        
         try:
             self.logger.info(f"正在亚马逊搜索: {keyword}")
             # 访问亚马逊搜索页
             await page.goto(f"https://www.amazon.com/s?k={keyword}", timeout=60000)
             
+            # --- 检测验证码 ---
+            async def check_captcha():
+                title = await page.title()
+                content = await page.content()
+                if "Robot Check" in title or "Captcha" in title or "验证码" in title or "sp-cc-container" in content:
+                    self.logger.warning("⚠️ 检测到亚马逊验证码/拦截！请在浏览器中手动完成验证。")
+                    if not Config.HEADLESS_MODE:
+                        # 循环检查直到验证码消失或超时
+                        for _ in range(60):
+                            await asyncio.sleep(1)
+                            new_title = await page.title()
+                            if "Robot Check" not in new_title and "Captcha" not in new_title:
+                                self.logger.info("✅ 验证码已处理。")
+                                return True
+                        return False
+                return True
+
+            await check_captcha()
+
             # 等待商品列表加载
             try:
-                await page.wait_for_selector('div[data-component-type="s-search-result"]', timeout=30000)
+                # Amazon 的选择器可能因地区不同而异
+                await page.wait_for_selector('div[data-component-type="s-search-result"], .s-result-item, [data-asin]', timeout=20000)
             except Exception:
-                self.logger.warning("Amazon 页面加载可能超时或出现验证码")
-                # 截图调试
-                # await page.screenshot(path="debug_amazon_fail.png")
+                self.logger.warning("Amazon 页面加载超时，尝试最后一次人工介入机会...")
+                await check_captcha()
+                # 截图方便排查
+                await page.screenshot(path="data/reports/amazon_debug.png")
             
             products = []
             results = await page.query_selector_all('div[data-component-type="s-search-result"]')
             
+            if not results:
+                # 尝试更宽泛的选择器
+                results = await page.query_selector_all('.s-result-item[data-asin]')
+
             for item in results[:limit]:
                 try:
                     # 提取标题
@@ -60,12 +90,10 @@ class AmazonCrawler(BaseCrawler):
                     
                     # 提取价格 (优化版 - 增强兼容性)
                     price = "N/A"
-                    # 策略1: 标准价格块
                     price_el = await item.query_selector('.a-price .a-offscreen')
                     if price_el:
                         price = await price_el.inner_text()
                     
-                    # 策略2: 分段价格 (当策略1获取到的是隐藏文本时，可能需要这个)
                     if price == "N/A" or not price:
                         price_whole = await item.query_selector('.a-price-whole')
                         price_fraction = await item.query_selector('.a-price-fraction')
@@ -79,25 +107,15 @@ class AmazonCrawler(BaseCrawler):
                     
                     # 提取评分
                     rating = "N/A"
-                    rating_el = await item.query_selector('span[aria-label*="out of 5 stars"]') # 策略1
+                    rating_el = await item.query_selector('span[aria-label*="out of 5 stars"]')
                     if rating_el:
                         rating = await rating_el.get_attribute('aria-label')
-                    else:
-                        # 策略2: 尝试查找 class="a-icon-alt"
-                        rating_alt = await item.query_selector('i.a-icon-star-small span.a-icon-alt')
-                        if rating_alt:
-                            rating = await rating_alt.inner_text()
 
-                    # 提取评论数 (新增)
+                    # 提取评论数
                     reviews = "0"
-                    reviews_el = await item.query_selector('span[aria-label*="ratings"]') # 有时是 ratings
-                    if not reviews_el:
-                         # 尝试查找链接文本，通常评论数在评分旁边
-                        reviews_link = await item.query_selector('div[data-cy="reviews-block"] a span.a-size-base')
-                        if reviews_link:
-                            reviews = await reviews_link.inner_text()
-                    else:
-                        reviews = await reviews_el.get_attribute('aria-label')
+                    reviews_el = await item.query_selector('span[aria-label*="ratings"], a .a-size-base')
+                    if reviews_el:
+                        reviews = await reviews_el.inner_text()
                     
                     # 提取图片
                     img_el = await item.query_selector('img.s-image')
@@ -106,20 +124,19 @@ class AmazonCrawler(BaseCrawler):
                     products.append({
                         "platform": "Amazon",
                         "keyword": keyword,
-                        "title": title,
-                        "price": price,
+                        "title": title.strip(),
+                        "price": price.strip(),
                         "rating": rating,
-                        "reviews_count": reviews, # 新增字段
+                        "reviews_count": reviews,
                         "asin": asin,
                         "image_url": img_url,
                         "product_url": f"https://www.amazon.com/dp/{asin}" if asin else ""
                     })
                     
                 except Exception as e:
-                    self.logger.error(f"解析单个商品出错: {e}")
                     continue
             
-            self.logger.info(f"成功抓取 {len(products)} 个商品")
+            self.logger.info(f"成功抓取 {len(products)} 个 Amazon 商品")
             return products
             
         except Exception as e:
@@ -129,7 +146,6 @@ class AmazonCrawler(BaseCrawler):
             await page.close()
 
     async def get_product_details(self, product_id: str) -> Dict[str, Any]:
-        # 暂未实现详细页抓取
         return {}
 
     async def close(self):

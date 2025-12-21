@@ -4,18 +4,18 @@ from playwright.async_api import async_playwright
 from src.crawlers.base_crawler import BaseCrawler
 from src.config import Config
 import urllib.parse
+from fake_useragent import UserAgent
+from playwright_stealth import Stealth
 
 class ShopeeCrawler(BaseCrawler):
-    def __init__(self, region: str = "my"):
-        """
-        :param region: 地区后缀, e.g., 'my' (马来西亚), 'sg' (新加坡), 'tw' (台湾)
-        """
-        super().__init__("shopee")
+    def __init__(self, region: str = "com.my"):
+        super().__init__(f"shopee_{region}")
         self.region = region
         self.base_url = f"https://shopee.{region}"
         self.browser = None
         self.context = None
         self.playwright = None
+        self.ua = UserAgent()
 
     async def _init_browser(self):
         if not self.playwright:
@@ -25,60 +25,91 @@ class ShopeeCrawler(BaseCrawler):
                 args=['--disable-blink-features=AutomationControlled']
             )
             self.context = await self.browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                viewport={'width': 1280, 'height': 800},
+                user_agent=self.ua.random
             )
 
     async def search_products(self, keyword: str, limit: int = 10) -> List[Dict[str, Any]]:
         await self._init_browser()
         page = await self.context.new_page()
         
+        stealth = Stealth()
+        await stealth.apply_stealth_async(page)
+        
         try:
-            self.logger.info(f"正在 Shopee ({self.region}) 搜索: {keyword}")
-            encoded_kw = urllib.parse.quote(keyword)
-            url = f"{self.base_url}/search?keyword={encoded_kw}"
-            
+            self.logger.info(f"正在 Shopee({self.region}) 搜索: {keyword}")
+            # Shopee 搜索 URL
+            url = f"{self.base_url}/search?keyword={urllib.parse.quote(keyword)}"
             await page.goto(url, timeout=60000)
             
-            # Shopee 搜索结果列表选择器
-            # 这是一个动态类名，通常包含 'shopee-search-item-result__item'
-            await page.wait_for_selector('div[data-sqe="item"]', timeout=20000)
+            # --- 处理可能的语言选择弹窗 ---
+            try:
+                # 尝试点击 English 按钮 (常见于 Shopee 弹窗)
+                lang_btn = await page.query_selector('button:has-text("English")')
+                if lang_btn: await lang_btn.click()
+            except: pass
+
+            # --- 检测验证码 ---
+            async def check_captcha():
+                content = await page.content()
+                if "captcha" in content.lower() or "verify" in content.lower():
+                    self.logger.warning("⚠️ 检测到 Shopee 验证拦截！请在 60 秒内手动完成。")
+                    if not Config.HEADLESS_MODE:
+                        await asyncio.sleep(60)
             
-            products = []
-            items = await page.query_selector_all('div[data-sqe="item"]')
-            
-            for item in items[:limit]:
-                try:
-                    # 提取标题
-                    # 这里的 selector 需要根据实际 Shopee DOM 调整
-                    title_el = await item.query_selector('div[data-sqe="name"] > div')
-                    title = await title_el.inner_text() if title_el else "Unknown"
+            await check_captcha()
+
+            # 等待列表加载
+            try:
+                await page.wait_for_selector('div.shopee-search-item-result__items, a[data-sqe="link"]', timeout=30000)
+            except:
+                self.logger.warning("Shopee 加载超时，尝试截图...")
+                await page.screenshot(path="data/reports/shopee_debug.png")
+
+            # 滚动加载
+            await page.evaluate("window.scrollBy(0, 1000)")
+            await asyncio.sleep(2)
+
+            # 解析逻辑
+            products = await page.evaluate(f"""(limit) => {{
+                const results = [];
+                const items = document.querySelectorAll('a[data-sqe="link"]');
+                
+                for (const item of items) {{
+                    if (results.length >= limit) break;
                     
-                    # 提取价格
-                    price_el = await item.query_selector('span[class*="_24JoLh"]') # 示例混淆类名
-                    if not price_el:
-                        # 尝试通用结构
-                        price_el = await item.query_selector('div > span:nth-child(2)')
+                    let title = "";
+                    const titleEl = item.querySelector('div[data-sqe="name"]');
+                    if (titleEl) title = titleEl.innerText;
                     
-                    price = await price_el.inner_text() if price_el else "N/A"
+                    let price = "N/A";
+                    const priceEl = item.querySelector('div.shopee-item-card__current-price, span._2v09_B');
+                    if (priceEl) price = priceEl.innerText;
                     
-                    # 提取销量 (e.g., "1.2k sold")
-                    sold_el = await item.query_selector('div:has-text("sold")') 
-                    sold = await sold_el.inner_text() if sold_el else "0"
-                    
-                    # 链接
-                    link_el = await item.query_selector('a')
-                    link = await link_el.get_attribute('href') if link_el else ""
-                    
-                    products.append({
-                        "platform": f"Shopee-{self.region}",
-                        "keyword": keyword,
-                        "title": title,
+                    // 如果没找到，尝试在整个内容中找数字
+                    if (price === "N/A") {{
+                        const text = item.innerText;
+                        const match = text.match(/[\\d\\.,]+/);
+                        if (match) price = match[0];
+                    }}
+
+                    let sold = "0";
+                    const soldEl = item.querySelector('div.shopee-item-card__sold-count, div.Znr67M');
+                    if (soldEl) sold = soldEl.innerText;
+
+                    results.push({{
+                        "platform": "Shopee",
+                        "title": title.trim(),
                         "price": price,
                         "sold": sold,
-                        "link": f"{self.base_url}{link}"
-                    })
-                except Exception as e:
-                    continue
+                        "link": item.href
+                    }});
+                }}
+                return results;
+            }}""", limit)
+            
+            for p in products:
+                p['keyword'] = keyword
             
             self.logger.info(f"成功抓取 {len(products)} 个 Shopee 商品")
             return products
@@ -89,11 +120,10 @@ class ShopeeCrawler(BaseCrawler):
         finally:
             await page.close()
 
-    async def close(self):
-        if self.context:
-            await self.context.close()
-        if self.browser:
-            await self.browser.close()
-        if self.playwright:
-            await self.playwright.stop()
+    async def get_product_details(self, product_id: str) -> Dict[str, Any]:
+        return {}
 
+    async def close(self):
+        if self.context: await self.context.close()
+        if self.browser: await self.browser.close()
+        if self.playwright: await self.playwright.stop()

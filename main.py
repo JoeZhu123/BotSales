@@ -1,12 +1,15 @@
 import asyncio
 from src.crawlers.amazon_crawler import AmazonCrawler
 from src.crawlers.aliexpress_crawler import AliExpressCrawler
+from src.crawlers.temu_crawler import TemuCrawler
+from src.crawlers.shopee_crawler import ShopeeCrawler
 from src.crawlers.kickstarter_crawler import KickstarterCrawler
 from src.sourcing.sourcer_1688 import Sourcer1688
 from src.sourcing.sourcer_yiwugo import SourcerYiwuGo
 from src.utils.translator import Translator
 from src.analysis.market_analyzer import MarketAnalyzer
 from src.utils.visualizer import DataVisualizer
+from src.utils.report_generator import ReportGenerator
 import pandas as pd
 import os
 from datetime import datetime
@@ -42,6 +45,24 @@ async def main():
     await ali.close()
     if res:
         print(f"✅ AliExpress: {len(res)} items")
+        sales_data.extend(res)
+
+    # Task 2.1: Temu
+    print(f"\n[新增] 正在采集 Temu 数据...")
+    temu = TemuCrawler()
+    res = await temu.search_products(keyword, limit=5)
+    await temu.close()
+    if res:
+        print(f"✅ Temu: {len(res)} items")
+        sales_data.extend(res)
+
+    # Task 2.2: Shopee
+    print(f"\n[新增] 正在采集 Shopee 数据...")
+    shopee = ShopeeCrawler()
+    res = await shopee.search_products(keyword, limit=5)
+    await shopee.close()
+    if res:
+        print(f"✅ Shopee: {len(res)} items")
         sales_data.extend(res)
 
     if not sales_data:
@@ -109,6 +130,12 @@ async def main():
     visualizer = DataVisualizer()
     viz_path = visualizer.generate_dashboard(safe_keyword, analysis, sales_data, sourcing_data, trend_data)
     print(f"✅ 可视化仪表盘已生成: {viz_path}")
+
+    # === 7. 生成 Word 深度分析报告 ===
+    print(f"\n正在生成 Word 深度分析报告...")
+    report_gen = ReportGenerator()
+    docx_path = report_gen.generate_word_report(keyword, analysis, sales_data, sourcing_data, trend_data, viz_path)
+    print(f"✅ Word 深度报告已生成: {docx_path}")
 
     # === 数据保存 ===
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
